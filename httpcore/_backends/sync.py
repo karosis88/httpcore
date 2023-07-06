@@ -19,6 +19,17 @@ from .._utils import is_socket_readable
 from .base import SOCKET_OPTION, NetworkBackend, NetworkStream
 
 
+def perform_io(
+    func: typing.Callable[..., typing.Any],
+    timeout: typing.Optional[float]
+) - > typing.Tuple[typing.Any, typing.Optional[float]]:
+    if timeout is not None and timeout <= 0:
+        raise socket.timeout()
+    start = perf_counter()
+
+    return func(), timeout - (perf_counter() - start)
+
+
 class SyncTLSStream(NetworkStream):
     """
     Because the standard `SSLContext.wrap_socket` method does
@@ -52,6 +63,8 @@ class SyncTLSStream(NetworkStream):
         timeout: typing.Optional[float],
     ) -> typing.Any:
         ret = None
+        timeout = timeout or None  # Replaces `0` with `None`
+
         while True:
             errno = None
             try:
@@ -60,23 +73,15 @@ class SyncTLSStream(NetworkStream):
                 errno = e.errno
 
             self._sock.settimeout(timeout)
-            operation_start = perf_counter()
-            self._sock.sendall(self._outgoing.read())
-            # If the timeout is `None`, don't touch it.
-            timeout = timeout and timeout - (perf_counter() - operation_start)
-            if timeout is not None and timeout <= 0:  # pragma: no cover
-                raise socket.timeout()
+            _, timeout = perform_io(
+                partial(self._sock.sendall, self._outgoing.read()), timeout
+            )
 
             if errno == ssl.SSL_ERROR_WANT_READ:
                 self._sock.settimeout(timeout)
-                operation_start = perf_counter()
-                # If the timeout is `None`, don't touch it.
-                timeout = timeout and timeout - (perf_counter() - operation_start)
-
-                if timeout is not None and timeout <= 0:  # pragma: no cover
-                    raise socket.timeout
-
-                buf = self._sock.recv(10000)
+                buf, timeout = perform_io(
+                    partial(self._sock.recv, 10000), timeout
+                )
                 if buf:
                     self._incoming.write(buf)
                 else:
