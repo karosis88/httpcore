@@ -23,15 +23,12 @@ def perform_io(
     func: typing.Callable[..., typing.Any],
     timeout: typing.Optional[float]
 ) - > typing.Tuple[typing.Any, typing.Optional[float]]:
-    if timeout is not None and timeout <= 0:
+    if timeout is None:
+        return func(), timeout
+    if timeout <= 0:
         raise socket.timeout()
-
     start = perf_counter()
-    result = func()
-    if timeout is not None:
-        timeout = timeout - (perf_counter() - start)
-
-    return result, timeout
+    return func(), timeout - (perf_counter() - start)
 
 
 class SyncTLSStream(NetworkStream):
